@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: atendimento
+      POSTGRES_USER: atendimento
+      POSTGRES_PASSWORD: local_demo_only
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atendimento -d atendimento"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  crm-simulator:
+    build:
+      context: .
+      dockerfile: crm-simulator/Dockerfile
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8080"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: backend/Api/Dockerfile
+    environment:
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=atendimento;Username=atendimento;Password=local_demo_only
+      Crm__BaseUrl: http://crm-simulator:8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      crm-simulator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8080"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres_data:

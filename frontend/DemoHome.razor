@@ -1,0 +1,41 @@
+@page "/"
+@using Application.Demo
+@inject IDemoCatalog Catalog
+
+<PageTitle>Plataforma de Atendimento de Contas</PageTitle>
+
+<h1>Plataforma de Atendimento de Contas</h1>
+<p>Ambiente local de demonstração com dados fictícios.</p>
+
+@if (data is null)
+{
+    <p>Carregando dados de demonstração...</p>
+}
+else
+{
+    <section>
+        <h2>Usuários fictícios</h2>
+        <ul>
+            @foreach (var user in data.Users)
+            {
+                <li>@user.DisplayName — @(user.Role == "Supervisor" ? "Supervisor" : "Atendente")</li>
+            }
+        </ul>
+    </section>
+    <section>
+        <h2>Clientes fictícios</h2>
+        <ul>
+            @foreach (var client in data.Clients)
+            {
+                <li>@client.DisplayName</li>
+            }
+        </ul>
+    </section>
+    <p>Base local pronta. As jornadas de atendimento serão implementadas nas próximas tarefas.</p>
+}
+
+@code {
+    private DemoCatalog? data;
+
+    protected override async Task OnInitializedAsync() => data = await Catalog.GetAsync();
+}

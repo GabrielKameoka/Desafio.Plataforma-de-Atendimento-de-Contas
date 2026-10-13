@@ -1,5 +1,17 @@
 # Desafio: Plataforma de Atendimento de Contas
 
+## Execução local — T-01
+
+Pré-requisito: Docker com Compose. Na raiz do repositório, execute:
+
+```bash
+docker compose up --build
+```
+
+Abra <http://localhost:8080>. A página inicial lista dois atendentes, uma supervisora e dois clientes fictícios. O host aplica a migração inicial do EF Core e insere esses registros com identificadores fixos; reiniciar o Compose não os duplica. Para conferir os serviços, acesse <http://localhost:8080/health> e execute `docker compose ps`. O PostgreSQL fica restrito à rede do Compose; o simulador de CRM responde em `/health` nessa rede.
+
+Para compilar e executar os testes da solução localmente, use `dotnet build Desafio.Plataforma-de-Atendimento-de-Contas.sln` e `dotnet test Desafio.Plataforma-de-Atendimento-de-Contas.sln`. A T-01 entrega a base de execução. Identidade, casos, histórico e sincronização serão implementados nas tarefas seguintes; a presença de usuários na página ainda não cria sessão.
+
 ## Contexto
 
 Uma instituição financeira atende clientes por diferentes canais. Durante um contato, o atendente precisa entender rapidamente o contexto da conta, consultar solicitações anteriores e registrar o que foi combinado. Quando a informação fica espalhada entre sistemas, o atendimento perde continuidade, os prazos ficam difíceis de acompanhar e integrações com ferramentas de relacionamento podem falhar sem que a equipe perceba.
@@ -16,7 +28,7 @@ Use **C# e .NET em toda a aplicação, inclusive na interface**. Trabalhe soment
 
 ## Cenário principal
 
-Uma cliente questiona uma tarifa lançada em sua conta. O atendente localiza seu cadastro, visualiza informações mascaradas e o histórico de contatos, abre uma contestação e recebe um protocolo. Outro atendente assume a solicitação, registra uma interação e atualiza o andamento. Quando a análise termina, a solicitação é resolvida com uma justificativa. Um supervisor consegue identificar casos próximos do prazo e verificar o histórico das decisões.
+Uma cliente questiona uma tarifa lançada em sua conta. O atendente localiza seu cadastro fictício, visualiza as interações registradas em solicitações anteriores, abre uma contestação e recebe um protocolo. Outro atendente assume a solicitação, registra uma interação e atualiza o andamento. Quando a análise termina, a solicitação é resolvida com uma justificativa. Um supervisor consegue identificar casos próximos do prazo e verificar o histórico das decisões.
 
 Esse cenário deve funcionar integralmente pela interface. A integração com o CRM deve ocorrer sem impedir o registro do atendimento quando o serviço externo falhar.
 
@@ -24,10 +36,10 @@ Esse cenário deve funcionar integralmente pela interface. A integração com o 
 
 ### Atendente
 
-- Consultar clientes fictícios e uma visão resumida de suas contas, com dados sensíveis mascarados.
-- Ver solicitações abertas e histórico de contatos de um cliente.
+- Consultar clientes fictícios identificados apenas por ID e nome fictícios.
+- Ver solicitações abertas e o histórico de interações registradas nas solicitações de um cliente.
 - Abrir uma contestação de tarifa e receber um protocolo único.
-- Assumir ou atribuir uma solicitação, registrar interações e alterar seu status.
+- Assumir ou atribuir qualquer solicitação, registrar interações e alterar seu status.
 - Resolver uma solicitação com justificativa e consultar seu histórico de alterações.
 
 ### Supervisor
@@ -38,14 +50,14 @@ Esse cenário deve funcionar integralmente pela interface. A integração com o 
 
 ## Regras obrigatórias
 
-1. Cada solicitação possui protocolo único, cliente, tipo, status, prioridade, responsável e prazo de atendimento.
+1. Cada solicitação possui protocolo único, cliente, tipo, status, prioridade, responsável e prazo de atendimento. Na abertura, o sistema define prioridade Média, atribui o caso ao atendente que o abriu e calcula o prazo em dias úteis conforme a prioridade.
 2. Os status são **Aberta**, **Em análise**, **Aguardando cliente** e **Resolvida**. Documente as transições permitidas. A reabertura de uma solicitação resolvida exige motivo e registro no histórico.
 3. Toda mudança de status, prioridade, responsável ou prazo registra quem fez a alteração, quando ela ocorreu e o motivo informado.
 4. Uma alteração baseada em dados desatualizados não pode sobrescrever silenciosamente uma alteração mais recente feita por outro atendente. A interface deve informar o conflito.
-5. Repetir a mesma requisição de abertura não pode gerar dois protocolos. Reutilizar a mesma chave de requisição com dados diferentes deve ser tratado como conflito.
+5. A interface gera uma chave para cada tentativa de abertura e a preserva se precisar repetir a tentativa. Repetir a mesma requisição não pode gerar dois protocolos; reutilizar a mesma chave com dados diferentes deve ser tratado como conflito.
 6. Uma falha na sincronização com o CRM não pode apagar nem desfazer uma solicitação já registrada. O sistema deve mostrar que a sincronização está pendente ou falhou e permitir sua recuperação.
-7. Dados sensíveis devem aparecer mascarados na interface e não podem ser gravados em logs, métricas ou mensagens de erro.
-8. Ações de atendente e supervisor devem respeitar os respectivos perfis. O projeto pode usar usuários de demonstração; não deve depender de credenciais reais.
+7. O cadastro usa apenas ID e nome fictícios, sem documento ou número de conta. Nome, descrições e interações não devem aparecer em logs, métricas ou mensagens de erro.
+8. Qualquer atendente pode consultar e alterar qualquer solicitação. A reabertura de um caso resolvido é exclusiva do supervisor. O projeto pode usar usuários de demonstração; não deve depender de credenciais reais.
 
 ## Stack e limites
 
