@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "dgSpecHash": "QRlL2Fz6guM=",
+  "success": true,
+  "projectFilePath": "/Users/mitsuru/Developer/dotnetProjects/Desafio.Plataforma-de-Atendimento-de-Contas/backend/backend.csproj",
+  "expectedPackageFiles": [
+    "/Users/mitsuru/.nuget/packages/microsoft.aspnetcore.openapi/10.0.10/microsoft.aspnetcore.openapi.10.0.10.nupkg.sha512",
+    "/Users/mitsuru/.nuget/packages/microsoft.openapi/2.0.0/microsoft.openapi.2.0.0.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1903",
+      "level": "Warning",
+      "message": "O pacote 'Microsoft.OpenApi' 2.0.0 tem uma alta vulnerabilidade de gravidade conhecida, https://github.com/advisories/GHSA-v5pm-xwqc-g5wc",
+      "projectPath": "/Users/mitsuru/Developer/dotnetProjects/Desafio.Plataforma-de-Atendimento-de-Contas/backend/backend.csproj",
+      "warningLevel": 1,
+      "filePath": "/Users/mitsuru/Developer/dotnetProjects/Desafio.Plataforma-de-Atendimento-de-Contas/backend/backend.csproj",
+      "libraryId": "Microsoft.OpenApi",
+      "targetGraphs": [
+        "net10.0"
+      ]
+    }
+  ]
+}
