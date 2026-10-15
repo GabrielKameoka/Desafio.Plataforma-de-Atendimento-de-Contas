@@ -8,9 +8,34 @@ Pré-requisito: Docker com Compose. Na raiz do repositório, execute:
 docker compose up --build
 ```
 
-Abra <http://localhost:8080>. A página inicial lista dois atendentes, uma supervisora e dois clientes fictícios. O host aplica a migração inicial do EF Core e insere esses registros com identificadores fixos; reiniciar o Compose não os duplica. Para conferir os serviços, acesse <http://localhost:8080/health> e execute `docker compose ps`. O PostgreSQL fica restrito à rede do Compose; o simulador de CRM responde em `/health` nessa rede.
+Abra <http://localhost:8080>. A página inicial oferece dois atendentes e uma supervisora fictícios; depois de escolher um deles, mostra os clientes fictícios. O host aplica as migrações do EF Core e insere esses registros com identificadores fixos; reiniciar o Compose não os duplica. Para conferir os serviços, acesse <http://localhost:8080/health> e execute `docker compose ps`. O PostgreSQL também fica acessível somente na máquina local em `127.0.0.1:5433`, para permitir `dotnet run`; o simulador de CRM responde em `/health` na rede do Compose.
 
-Para compilar e executar os testes da solução localmente, use `dotnet build Desafio.Plataforma-de-Atendimento-de-Contas.sln` e `dotnet test Desafio.Plataforma-de-Atendimento-de-Contas.sln`. A T-01 entrega a base de execução. Identidade, casos, histórico e sincronização serão implementados nas tarefas seguintes; a presença de usuários na página ainda não cria sessão.
+### Rodar a API pelo terminal
+
+Na raiz do repositório, inicie apenas o banco e depois o host ASP.NET Core:
+
+```bash
+docker compose up -d postgres
+dotnet run --project backend/Api --launch-profile http
+```
+
+Abra <http://localhost:5080>. O perfil `http` usa `appsettings.Development.json`, que aponta para o PostgreSQL local na porta `5433`; o host aplica as migrações e os dados fictícios automaticamente. O serviço `crm-simulator` ainda não é necessário para os fluxos implementados até a T-03. Se você executar `dotnet run` de dentro de `backend/Api`, use apenas `dotnet run --launch-profile http` depois de subir o banco.
+
+`backend/Api` é o host ASP.NET Core: registra dependências e expõe os endpoints Minimal API. Os componentes Razor e os arquivos estáticos da interface ficam em `frontend`. A API hospeda essa biblioteca Blazor no mesmo processo, conforme o plano do monólito modular.
+
+Para compilar e testar a solução localmente, use `dotnet build Desafio.Plataforma-de-Atendimento-de-Contas.sln` e `dotnet test Desafio.Plataforma-de-Atendimento-de-Contas.sln`. A T-02 adiciona as tabelas de solicitações, interações, auditoria, idempotência e outbox, com chaves estrangeiras e índices. A T-03 implementa as regras de abertura, transição, histórico, bloqueio após resolução e prazo em dias úteis no domínio, com testes xUnit. A T-04 adiciona uma sessão por cookie ao selecionar um usuário fictício, protege o catálogo e expõe uma visão resumida da carteira apenas ao supervisor. A seleção e o encerramento de sessão exigem token antifalsificação; clientes HTTP podem obtê-lo em `GET /api/auth/csrf` e enviá-lo no cabeçalho `X-CSRF-TOKEN`, renovando o token após uma troca de sessão. O mecanismo de seleção não autentica pessoas reais e só serve à demonstração. Consulta de histórico, abertura de casos e sincronização serão implementadas nas tarefas seguintes.
+
+| Rota | Acesso | Resposta |
+| --- | --- | --- |
+| `GET /api/auth/users` | Público | Lista de usuários fictícios ativos. |
+| `GET /api/auth/csrf` | Público | Token para chamadas mutáveis; também define cookie antifalsificação. |
+| `POST /api/auth/session` | Público, com CSRF | Recebe `{ "userId": "..." }` e devolve usuário selecionado; 400 para entrada inválida e 404 para usuário ausente ou inativo. |
+| `GET /api/auth/session` | Sessão | Usuário atual; 401 sem sessão. |
+| `DELETE /api/auth/session` | Sessão e CSRF | Encerra a sessão; 401 sem sessão. |
+| `GET /api/demo/catalog` | Atendente ou supervisor | Catálogo fictício; 401 sem sessão. |
+| `GET /api/demo/supervisor/overview` | Supervisor | Quantidade de solicitações; 401 sem sessão e 403 para atendente. |
+
+Erros da API retornam `ProblemDetails` com título em português e um campo `code` técnico. A interface usa formulários protegidos para iniciar ou trocar a sessão.
 
 ## Contexto
 

@@ -7,4 +7,5 @@ public sealed record DemoCatalog(IReadOnlyList<DemoUser> Users, IReadOnlyList<De
 public interface IDemoCatalog
 {
     Task<DemoCatalog> GetAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DemoUser>> GetUsersAsync(CancellationToken cancellationToken = default);
 }

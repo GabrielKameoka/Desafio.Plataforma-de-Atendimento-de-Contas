@@ -1,3 +1,4 @@
+using Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace Infrastructure.Persistence;
@@ -11,14 +12,14 @@ public static class DemoSeed
         // Stable identifiers make restarts safe and keep future demo scenarios reproducible.
         var users = new[]
         {
-            new DemoUserRow { Id = Guid.Parse("00000000-0000-0000-0000-000000000101"), DisplayName = "Ana Costa", Role = "Attendant" },
-            new DemoUserRow { Id = Guid.Parse("00000000-0000-0000-0000-000000000102"), DisplayName = "Bruno Lima", Role = "Attendant" },
-            new DemoUserRow { Id = Guid.Parse("00000000-0000-0000-0000-000000000103"), DisplayName = "Clara Souza", Role = "Supervisor" }
+            new DemoUser(Guid.Parse("00000000-0000-0000-0000-000000000101"), "Ana Costa", DemoRole.Attendant),
+            new DemoUser(Guid.Parse("00000000-0000-0000-0000-000000000102"), "Bruno Lima", DemoRole.Attendant),
+            new DemoUser(Guid.Parse("00000000-0000-0000-0000-000000000103"), "Clara Souza", DemoRole.Supervisor)
         };
         var clients = new[]
         {
-            new DemoClientRow { Id = Guid.Parse("00000000-0000-0000-0000-000000000201"), DisplayName = "Marina Alves" },
-            new DemoClientRow { Id = Guid.Parse("00000000-0000-0000-0000-000000000202"), DisplayName = "Rafael Nunes" }
+            new Client(Guid.Parse("00000000-0000-0000-0000-000000000201"), "Marina Alves"),
+            new Client(Guid.Parse("00000000-0000-0000-0000-000000000202"), "Rafael Nunes")
         };
 
         foreach (var user in users)

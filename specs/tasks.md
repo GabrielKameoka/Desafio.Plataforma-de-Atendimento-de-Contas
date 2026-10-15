@@ -1,6 +1,6 @@
 # Tarefas — Plataforma de Atendimento de Contas
 
-Base: [`spec.md`](spec.md) e [`plan.md`](plan.md). As dependências indicam as tarefas que precisam estar concluídas antes de iniciar a tarefa da linha. Todas as tarefas estão pendentes.
+Base: [`spec.md`](spec.md) e [`plan.md`](plan.md). As dependências indicam as tarefas que precisam estar concluídas antes de iniciar a tarefa da linha. T-01 a T-04 estão implementadas; T-05 a T-10 estão pendentes.
 
 | ID | Tarefa | Origem | Dependente de | Concluída quando |
 | --- | --- | --- | --- | --- |

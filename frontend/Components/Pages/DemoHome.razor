@@ -1,0 +1,80 @@
+@page "/"
+@using Application.Demo
+@using Microsoft.AspNetCore.Components.Authorization
+@inject IDemoCatalog Catalog
+
+<PageTitle>Plataforma de Atendimento de Contas</PageTitle>
+
+<h1>Plataforma de Atendimento de Contas</h1>
+<p>Ambiente local de demonstração com dados e identidades fictícios.</p>
+
+@if (authenticated)
+{
+    <p>Você está usando a sessão de <strong>@displayName</strong> (@roleLabel).</p>
+    <form method="post" action="/auth/signout" data-enhance="false">
+        <AntiforgeryToken />
+        <button type="submit" class="btn btn-outline-secondary">Trocar usuário</button>
+    </form>
+
+    @if (data is not null)
+    {
+        <section class="mt-4">
+            <h2>Clientes fictícios</h2>
+            <ul>
+                @foreach (var client in data.Clients)
+                {
+                    <li>@client.DisplayName</li>
+                }
+            </ul>
+        </section>
+        @if (isSupervisor)
+        {
+            <p>O perfil de supervisor pode consultar a visão resumida em <code>/api/demo/supervisor/overview</code>.</p>
+        }
+    }
+}
+else
+{
+    <section>
+        <h2>Escolha um usuário fictício</h2>
+        <form method="post" action="/auth/select" data-enhance="false">
+            <AntiforgeryToken />
+            <div class="d-flex flex-wrap gap-2">
+                @foreach (var user in users)
+                {
+                    <button type="submit" name="userId" value="@user.Id" class="btn btn-outline-primary">
+                        @user.DisplayName — @(user.Role == "Supervisor" ? "Supervisor" : "Atendente")
+                    </button>
+                }
+            </div>
+        </form>
+    </section>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationState { get; set; } = default!;
+
+    private IReadOnlyList<DemoUser> users = [];
+    private DemoCatalog? data;
+    private bool authenticated;
+    private bool isSupervisor;
+    private string displayName = string.Empty;
+    private string roleLabel = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var principal = (await AuthenticationState).User;
+        authenticated = principal.Identity?.IsAuthenticated == true;
+        if (authenticated)
+        {
+            displayName = principal.Identity?.Name ?? string.Empty;
+            isSupervisor = principal.IsInRole("Supervisor");
+            roleLabel = isSupervisor ? "Supervisor" : "Atendente";
+            data = await Catalog.GetAsync();
+        }
+        else
+        {
+            users = await Catalog.GetUsersAsync();
+        }
+    }
+}
