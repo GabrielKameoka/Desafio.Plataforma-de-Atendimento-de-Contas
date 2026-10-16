@@ -1,0 +1,308 @@
+@page "/supervision"
+@rendermode InteractiveServer
+@using Application.Demo
+@using Application.Requests
+@using Application.CrmSync
+@using Application.Diagnostics
+@using Domain
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceScopeFactory ScopeFactory
+
+<PageTitle>Supervisão de casos</PageTitle>
+<h1>Supervisão de casos</h1>
+
+@if (!authenticated)
+{
+    <p>Selecione a supervisora fictícia na <a href="/">página inicial</a>.</p>
+}
+else if (!isSupervisor)
+{
+    <p>Esta fila é reservada à supervisão.</p>
+}
+else
+{
+    <p>Filtre por situação, prioridade, responsável e prazo. Casos aguardando o cliente continuam sujeitos ao prazo.</p>
+    <section class="mb-4" aria-labelledby="crm-heading">
+        <h2 id="crm-heading">Simulador de CRM</h2>
+        <p>Estado: <strong>@(crmAvailable is null ? "Não consultado" : crmAvailable.Value ? "Disponível" : "Indisponível")</strong></p>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-danger" disabled="@(crmBusy || crmAvailable == false)" @onclick="() => SetCrmAsync(false)">Indisponibilizar CRM</button>
+            <button class="btn btn-outline-success" disabled="@(crmBusy || crmAvailable == true)" @onclick="() => SetCrmAsync(true)">Restaurar CRM</button>
+            <button class="btn btn-outline-secondary" disabled="@crmBusy" @onclick="RefreshCrmAsync">Atualizar estado</button>
+        </div>
+        @if (crmError is not null)
+        {
+            <p class="text-danger mt-2" role="alert">@crmError</p>
+        }
+    </section>
+    <section class="mb-4" aria-labelledby="diagnostics-heading">
+        <h2 id="diagnostics-heading">Diagnóstico operacional</h2>
+        <p>Contadores do PostgreSQL e duração das operações desde o início deste processo.</p>
+        <button class="btn btn-outline-secondary mb-2" disabled="@busy" @onclick="RefreshDiagnosticsAsync">Atualizar diagnóstico</button>
+        @if (diagnostics is not null)
+        {
+            <p>Casos: <strong>@diagnostics.CaseCount</strong> · Envios pendentes: <strong>@diagnostics.PendingSyncCount</strong> · Envios com falha: <strong>@diagnostics.FailedSyncCount</strong> · Tentativas de envio com falha neste processo: <strong>@diagnostics.SyncFailureAttempts</strong></p>
+            <table class="table table-sm">
+                <thead><tr><th>Operação</th><th>Execuções</th><th>Duração média</th><th>Última duração</th></tr></thead>
+                <tbody>
+                    @foreach (var operation in diagnostics.Operations)
+                    {
+                        <tr><td>@OperationLabel(operation.Operation)</td><td>@operation.Count</td><td>@operation.AverageMilliseconds.ToString("F1") ms</td><td>@operation.LastMilliseconds.ToString("F1") ms</td></tr>
+                    }
+                </tbody>
+            </table>
+        }
+        @if (diagnosticsError is not null)
+        {
+            <p role="alert" class="text-danger">@diagnosticsError</p>
+        }
+    </section>
+    <div class="row g-2 mb-3">
+        <div class="col-md-3">
+            <label for="status-filter">Status</label>
+            <select id="status-filter" class="form-select" @bind="statusFilter">
+                <option value="">Todos</option>
+                <option value="Open">Aberta</option>
+                <option value="UnderReview">Em análise</option>
+                <option value="WaitingForCustomer">Aguardando cliente</option>
+                <option value="Resolved">Resolvida</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label for="priority-filter">Prioridade</label>
+            <select id="priority-filter" class="form-select" @bind="priorityFilter">
+                <option value="">Todas</option>
+                <option value="Low">Baixa</option>
+                <option value="Medium">Média</option>
+                <option value="High">Alta</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label for="assignee-filter">Responsável</label>
+            <select id="assignee-filter" class="form-select" @bind="assigneeFilter">
+                <option value="">Todos</option>
+                @foreach (var attendant in attendants)
+                {
+                    <option value="@attendant.Id">@attendant.DisplayName</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label for="due-filter">Prazo</label>
+            <select id="due-filter" class="form-select" @bind="dueFilter">
+                <option value="">Todos</option>
+                <option value="DueSoon">Próximas 24 horas</option>
+                <option value="Overdue">Vencido</option>
+            </select>
+        </div>
+    </div>
+    <button class="btn btn-primary mb-3" disabled="@busy" @onclick="ApplyFiltersAsync">Filtrar casos</button>
+    @if (error is not null)
+    {
+        <p class="alert alert-danger" role="alert">@error</p>
+    }
+    @if (queuePage is not null)
+    {
+        <p>@queuePage.Total caso(s) encontrados · Avaliado em @FormatTime(queuePage.EvaluatedAtUtc)</p>
+        @if (queuePage.Items.Count == 0)
+        {
+            <p>Nenhum caso corresponde aos filtros.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead><tr><th>Protocolo</th><th>Cliente</th><th>Status</th><th>Prioridade</th><th>Responsável</th><th>Prazo</th><th>Situação</th></tr></thead>
+                    <tbody>
+                        @foreach (var item in queuePage.Items)
+                        {
+                            <tr>
+                                <td><a href="@($"/requests/{item.Id}")">@item.Protocol</a></td>
+                                <td>@item.ClientName</td>
+                                <td>@StatusLabel(item.Status)</td>
+                                <td>@PriorityLabel(item.Priority)</td>
+                                <td>@item.AssigneeName</td>
+                                <td>@FormatTime(item.DeadlineAtUtc)</td>
+                                <td><strong>@DueLabel(item.DueState)</strong></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-secondary" disabled="@(busy || currentPage <= 1)" @onclick="PreviousAsync">Anterior</button>
+            <span>Página @queuePage.Page de @Math.Max(1, (queuePage.Total + queuePage.PageSize - 1) / queuePage.PageSize)</span>
+            <button class="btn btn-outline-secondary" disabled="@(busy || currentPage * queuePage.PageSize >= queuePage.Total)" @onclick="NextAsync">Próxima</button>
+        </div>
+    }
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationState { get; set; } = default!;
+    private bool authenticated;
+    private bool isSupervisor;
+    private bool busy;
+    private bool crmBusy;
+    private bool? crmAvailable;
+    private string? crmError;
+    private DiagnosticsSnapshot? diagnostics;
+    private string? diagnosticsError;
+    private string? error;
+    private string statusFilter = string.Empty;
+    private string priorityFilter = string.Empty;
+    private string assigneeFilter = string.Empty;
+    private string dueFilter = string.Empty;
+    private int currentPage = 1;
+    private RequestQueuePage? queuePage;
+    private IReadOnlyList<Application.Demo.DemoUser> attendants = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthenticationState).User;
+        authenticated = user.Identity?.IsAuthenticated == true;
+        isSupervisor = user.IsInRole("Supervisor");
+        if (!isSupervisor)
+            return;
+        using var scope = ScopeFactory.CreateScope();
+        attendants = (await scope.ServiceProvider.GetRequiredService<IDemoCatalog>().GetUsersAsync())
+            .Where(item => item.Role == "Attendant").ToList();
+        await SearchAsync();
+        await RefreshCrmAsync();
+        await RefreshDiagnosticsAsync();
+    }
+
+    private async Task RefreshDiagnosticsAsync()
+    {
+        if (!isSupervisor)
+            return;
+        diagnosticsError = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            diagnostics = await scope.ServiceProvider.GetRequiredService<GetDiagnosticsUseCase>()
+                .ExecuteAsync();
+        }
+        catch (Exception)
+        {
+            diagnosticsError = "Não foi possível consultar o diagnóstico.";
+        }
+    }
+
+    private static string OperationLabel(string operation) => operation switch
+    {
+        "open" => "Abertura",
+        "change" => "Alteração",
+        "send" => "Envio ao CRM",
+        _ => operation
+    };
+
+    private async Task RefreshCrmAsync()
+    {
+        if (crmBusy || !isSupervisor)
+            return;
+        crmBusy = true;
+        crmError = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            crmAvailable = await scope.ServiceProvider.GetRequiredService<ManageCrmDemoUseCase>()
+                .GetAvailabilityAsync();
+        }
+        catch (Exception)
+        {
+            crmAvailable = null;
+            crmError = "Não foi possível consultar o simulador de CRM.";
+        }
+        finally
+        {
+            crmBusy = false;
+        }
+    }
+
+    private async Task SetCrmAsync(bool available)
+    {
+        if (crmBusy || !isSupervisor)
+            return;
+        crmBusy = true;
+        crmError = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            crmAvailable = await scope.ServiceProvider.GetRequiredService<ManageCrmDemoUseCase>()
+                .SetAvailabilityAsync(available);
+        }
+        catch (Exception)
+        {
+            crmError = "Não foi possível alterar o estado do simulador de CRM.";
+        }
+        finally
+        {
+            crmBusy = false;
+        }
+    }
+
+    private async Task ApplyFiltersAsync()
+    {
+        currentPage = 1;
+        await SearchAsync();
+    }
+
+    private async Task PreviousAsync()
+    {
+        currentPage--;
+        await SearchAsync();
+    }
+
+    private async Task NextAsync()
+    {
+        currentPage++;
+        await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        if (busy || !isSupervisor)
+            return;
+        busy = true;
+        error = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            queuePage = await scope.ServiceProvider.GetRequiredService<GetRequestQueueUseCase>()
+                .ExecuteAsync(new RequestQueueQuery(
+                    string.IsNullOrEmpty(statusFilter) ? null : Enum.Parse<RequestStatus>(statusFilter),
+                    string.IsNullOrEmpty(priorityFilter) ? null : Enum.Parse<RequestPriority>(priorityFilter),
+                    Guid.TryParse(assigneeFilter, out var assigneeId) ? assigneeId : null,
+                    string.IsNullOrEmpty(dueFilter) ? null : Enum.Parse<DueFilter>(dueFilter),
+                    currentPage));
+        }
+        catch (Exception)
+        {
+            error = "Não foi possível carregar os casos. Tente filtrar novamente.";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "Open" => "Aberta", "UnderReview" => "Em análise", "WaitingForCustomer" => "Aguardando cliente",
+        "Resolved" => "Resolvida", _ => status
+    };
+    private static string PriorityLabel(string priority) => priority switch
+    {
+        "Low" => "Baixa", "Medium" => "Média", "High" => "Alta", _ => priority
+    };
+    private static string DueLabel(string state) => state switch
+    {
+        "Overdue" => "Vencido", "DueSoon" => "Próximo do prazo",
+        "Resolved" => "Resolvido", _ => "No prazo"
+    };
+    private static string FormatTime(DateTimeOffset instant) =>
+        TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo"))
+            .ToString("dd/MM/yyyy HH:mm");
+}

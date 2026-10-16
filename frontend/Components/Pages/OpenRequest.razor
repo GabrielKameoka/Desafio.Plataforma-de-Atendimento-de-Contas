@@ -1,0 +1,181 @@
+@page "/clients/{ClientId:guid}/requests/new"
+@rendermode InteractiveServer
+@using Application.Clients
+@using Application.Requests
+@using Domain
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceScopeFactory ScopeFactory
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Abrir contestação</PageTitle>
+
+<p><a href="@($"/clients/{ClientId}")">← Voltar ao cliente</a></p>
+<h1>Abrir contestação de tarifa</h1>
+
+@if (!authenticated)
+{
+    <p>Selecione um usuário fictício na <a href="/">página inicial</a>.</p>
+}
+else if (!isAttendant)
+{
+    <p>Somente atendentes podem abrir contestações.</p>
+}
+else if (client is null)
+{
+    <p>Cliente não encontrado.</p>
+}
+else
+{
+    <p>Cliente: <strong>@client.DisplayName</strong> (<code>@client.Id</code>).</p>
+    <form @onsubmit="SubmitAsync" @onsubmit:preventDefault>
+        <label for="description" class="form-label">Descrição da contestação</label>
+        <textarea id="description" class="form-control" rows="5" maxlength="4000" required
+                  @bind="description" @bind:event="oninput"></textarea>
+        <p class="mt-2">O sistema define a prioridade Média, o responsável atual e o prazo em três dias úteis.</p>
+        <button type="submit" class="btn btn-primary" disabled="@busy">@(result is null ? "Abrir contestação" : "Abrir outra contestação")</button>
+    </form>
+
+    @if (error is not null)
+    {
+        <p role="alert" class="text-danger mt-3">@error</p>
+        @if (lastKey is not null && description.Trim() == lastDescription)
+        {
+            <button type="button" class="btn btn-outline-primary" disabled="@busy" @onclick="RetryAsync">Tentar novamente com a mesma chave</button>
+        }
+    }
+
+    @if (result is not null)
+    {
+        <section class="mt-4" aria-labelledby="opened-heading">
+            <h2 id="opened-heading">Contestação registrada</h2>
+            <p>Protocolo: <strong>@result.Protocol</strong></p>
+            <dl>
+                <dt>Status</dt><dd>Aberta</dd>
+                <dt>Prioridade</dt><dd>Média</dd>
+                <dt>Responsável</dt><dd>@result.AssigneeName</dd>
+                <dt>Abertura</dt><dd>@FormatTime(result.OpenedAtUtc)</dd>
+                <dt>Prazo</dt><dd>@FormatTime(result.DeadlineAtUtc)</dd>
+            </dl>
+            <p><a href="@($"/requests/{result.Id}")">Conduzir a solicitação</a></p>
+            <button type="button" class="btn btn-outline-secondary" disabled="@busy" @onclick="ReplayLastAsync">Repetir última tentativa</button>
+            @if (replayed)
+            {
+                <p>O mesmo protocolo foi devolvido, sem criar outra solicitação.</p>
+            }
+        </section>
+    }
+}
+
+@code {
+    [Parameter] public Guid ClientId { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationState { get; set; } = default!;
+
+    private IJSObjectReference? attemptModule;
+    private ClientContext? client;
+    private Guid attendantId;
+    private bool authenticated;
+    private bool isAttendant;
+    private bool busy;
+    private bool replayed;
+    private string description = string.Empty;
+    private string lastDescription = string.Empty;
+    private string? lastKey;
+    private string? error;
+    private OpenRequestResponse? result;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var principal = (await AuthenticationState).User;
+        authenticated = principal.Identity?.IsAuthenticated == true;
+        isAttendant = principal.IsInRole("Attendant");
+        var sessionId = principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        attendantId = Guid.TryParse(sessionId, out var id) ? id : Guid.Empty;
+        if (!authenticated || !isAttendant || attendantId == Guid.Empty)
+            return;
+
+        using var scope = ScopeFactory.CreateScope();
+        client = await scope.ServiceProvider.GetRequiredService<GetClientContextUseCase>()
+            .ExecuteAsync(ClientId);
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (busy || client is null || !isAttendant)
+            return;
+
+        try
+        {
+            attemptModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/Frontend/request-attempt.js");
+            var normalized = description.Trim();
+            lastKey = await attemptModule.InvokeAsync<string>("getOrCreateAttemptKey",
+                ClientId.ToString("N"), attendantId.ToString("N"), normalized);
+            lastDescription = normalized;
+            await OpenAsync(lastKey, normalized);
+        }
+        catch (JSException)
+        {
+            error = "Não foi possível preservar a tentativa neste navegador. Tente novamente.";
+        }
+    }
+
+    private Task RetryAsync() => lastKey is null ? Task.CompletedTask : OpenAsync(lastKey, lastDescription);
+
+    private Task ReplayLastAsync() => lastKey is null ? Task.CompletedTask : OpenAsync(lastKey, lastDescription);
+
+    private async Task OpenAsync(string key, string attemptDescription)
+    {
+        if (busy)
+            return;
+
+        busy = true;
+        error = null;
+        replayed = false;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var opened = await scope.ServiceProvider.GetRequiredService<OpenFeeDisputeUseCase>()
+                .ExecuteAsync(ClientId, attendantId, attemptDescription, key);
+            result = opened.Response;
+            replayed = !opened.WasCreated;
+            if (attemptModule is not null)
+                await attemptModule.InvokeVoidAsync("clearAttemptKey", ClientId.ToString("N"),
+                    attendantId.ToString("N"), key);
+        }
+        catch (DomainRuleException exception)
+        {
+            error = exception.Message;
+        }
+        catch (RequestClientNotFoundException)
+        {
+            error = "Cliente não encontrado.";
+        }
+        catch (AttendantUnavailableException)
+        {
+            error = "A sessão de atendente não está mais disponível.";
+        }
+        catch (IdempotencyConflictException)
+        {
+            error = "Esta tentativa já foi usada para outro conteúdo. Altere os dados para iniciar uma nova abertura.";
+        }
+        catch (Exception)
+        {
+            error = "Não foi possível confirmar a abertura. Tente novamente com a mesma chave.";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (attemptModule is not null)
+            await attemptModule.DisposeAsync();
+    }
+
+    private static string FormatTime(DateTimeOffset instant) =>
+        TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo"))
+            .ToString("dd/MM/yyyy HH:mm");
+}

@@ -1,0 +1,393 @@
+@page "/requests/{Id:guid}"
+@rendermode InteractiveServer
+@using System.Globalization
+@using System.Security.Claims
+@using Application.Demo
+@using Application.Requests
+@using Application.CrmSync
+@using Domain
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceScopeFactory ScopeFactory
+
+<PageTitle>Conduzir solicitação</PageTitle>
+
+@if (!authenticated)
+{
+    <h1>Solicitação</h1>
+    <p>Selecione um usuário fictício na <a href="/">página inicial</a>.</p>
+}
+else if (detail is null)
+{
+    <h1>Solicitação não encontrada</h1>
+    <p>Confira o identificador no contexto do cliente.</p>
+}
+else
+{
+    <p><a href="@($"/clients/{detail.ClientId}")">← Voltar ao cliente</a> @if (isSupervisor) { <a class="ms-3" href="/supervision">Ver fila de supervisão</a> }</p>
+    <h1>Solicitação @detail.Protocol</h1>
+    <p>@detail.ClientName · Contestação de tarifa</p>
+    <dl>
+        <dt>Status</dt><dd>@StatusLabel(detail.Status)</dd>
+        <dt>Prioridade</dt><dd>@PriorityLabel(detail.Priority)</dd>
+        <dt>Responsável</dt><dd>@detail.AssigneeName</dd>
+        <dt>Prazo</dt><dd>@FormatTime(detail.DeadlineAtUtc)</dd>
+        <dt>Versão exibida</dt><dd>@detail.Version</dd>
+        <dt>Sincronização com CRM</dt><dd>@SyncLabel(detail.SyncStatus)</dd>
+    </dl>
+    <p>@detail.Description</p>
+
+    <section class="mb-4" aria-labelledby="sync-heading">
+        <h2 id="sync-heading">Sincronização com CRM</h2>
+        <p>Estado: <strong>@SyncLabel(sync?.Status)</strong></p>
+        <button class="btn btn-outline-secondary" disabled="@busy" @onclick="LoadAsync">Atualizar sincronização</button>
+        @if (isSupervisor && sync?.Status == "Failed")
+        {
+            <button class="btn btn-outline-primary ms-2" disabled="@busy" @onclick="RetrySyncAsync">Tentar envio novamente</button>
+        }
+        @if (sync?.Messages.Count > 0)
+        {
+            <ol class="mt-2">
+                @foreach (var item in sync.Messages)
+                {
+                    <li>Versão @item.RequestVersion · @SyncEventLabel(item.EventType) · @SyncLabel(item.Status)
+                        · @item.AttemptCount tentativa(s)
+                        <span> · correlação: <code>@item.CorrelationId</code> · evento: <code>@item.EventId</code></span>
+                        @if (item.LastAttemptAtUtc is { } last)
+                        {
+                            <span> · última: @FormatTime(last)</span>
+                        }
+                        @if (item.LastError is not null)
+                        {
+                            <span> · erro técnico: @item.LastError</span>
+                        }
+                    </li>
+                }
+            </ol>
+        }
+    </section>
+
+    @if (conflictVersion is not null)
+    {
+        <div class="alert alert-warning" role="alert">
+            Outra pessoa alterou este caso. Você vê a versão @detail.Version; a versão atual é @conflictVersion.
+            Leia o estado atual antes de decidir novamente. Sua alteração não foi aplicada.
+            <button class="btn btn-outline-primary ms-2" disabled="@busy" @onclick="LoadAsync">Ler estado atual</button>
+        </div>
+    }
+    @if (message is not null)
+    {
+        <p role="status" class="alert alert-info">@message</p>
+    }
+    @if (error is not null)
+    {
+        <p role="alert" class="alert alert-danger">@error</p>
+    }
+
+    @if (canEdit && detail.Status != "Resolved")
+    {
+        <section aria-labelledby="actions-heading">
+            <h2 id="actions-heading">Conduzir caso</h2>
+            <p>As alterações usam a versão exibida acima. Informe um motivo para cada decisão.</p>
+
+            <div class="mb-4">
+                <h3>Responsável</h3>
+                <select class="form-select" aria-label="Novo responsável" @bind="assigneeId">
+                    <option value="@Guid.Empty">Selecione um atendente</option>
+                    @foreach (var attendant in attendants)
+                    {
+                        <option value="@attendant.Id">@attendant.DisplayName</option>
+                    }
+                </select>
+                <input class="form-control mt-2" aria-label="Motivo da atribuição" maxlength="1000" placeholder="Motivo da atribuição" @bind="assignmentReason" />
+                <button class="btn btn-outline-primary mt-2" disabled="@busy" @onclick="AssignAsync">Assumir ou transferir</button>
+            </div>
+
+            <div class="mb-4">
+                <h3>Interação</h3>
+                <textarea class="form-control" aria-label="Texto da interação" maxlength="4000" rows="3" @bind="interactionText"></textarea>
+                <button class="btn btn-outline-primary mt-2" disabled="@busy" @onclick="AddInteractionAsync">Registrar interação</button>
+            </div>
+
+            <div class="mb-4">
+                <h3>Andamento</h3>
+                <select class="form-select" aria-label="Novo status" @bind="nextStatus">
+                    <option value="">Selecione o próximo status</option>
+                    @if (detail.Status is "Open" or "WaitingForCustomer")
+                    {
+                        <option value="UnderReview">Em análise</option>
+                    }
+                    @if (detail.Status == "UnderReview")
+                    {
+                        <option value="WaitingForCustomer">Aguardando cliente</option>
+                        <option value="Resolved">Resolvida</option>
+                    }
+                </select>
+                <input class="form-control mt-2" aria-label="Motivo da mudança de status" maxlength="1000" placeholder="Motivo ou justificativa da resolução" @bind="statusReason" />
+                <button class="btn btn-outline-primary mt-2" disabled="@busy" @onclick="ChangeStatusAsync">Atualizar andamento</button>
+            </div>
+
+            <div class="mb-4">
+                <h3>Prioridade</h3>
+                <select class="form-select" aria-label="Nova prioridade" @bind="nextPriority">
+                    <option value="">Selecione a prioridade</option>
+                    <option value="Low">Baixa</option>
+                    <option value="Medium">Média</option>
+                    <option value="High">Alta</option>
+                </select>
+                <input class="form-control mt-2" aria-label="Motivo da prioridade" maxlength="1000" placeholder="Motivo da prioridade" @bind="priorityReason" />
+                <button class="btn btn-outline-primary mt-2" disabled="@busy" @onclick="ChangePriorityAsync">Alterar prioridade</button>
+            </div>
+
+            <div class="mb-4">
+                <h3>Prazo</h3>
+                <label for="deadline">Novo prazo (horário de Brasília)</label>
+                <input id="deadline" class="form-control" type="datetime-local" value="@deadlineLocal" @onchange="e => deadlineLocal = e.Value?.ToString()" />
+                <input class="form-control mt-2" aria-label="Motivo do novo prazo" maxlength="1000" placeholder="Motivo do novo prazo" @bind="deadlineReason" />
+                <button class="btn btn-outline-primary mt-2" disabled="@busy" @onclick="ChangeDeadlineAsync">Alterar prazo</button>
+            </div>
+        </section>
+    }
+    else if (detail.Status == "Resolved")
+    {
+        <p>Este caso foi resolvido. A reabertura depende da supervisão.</p>
+        @if (isSupervisor)
+        {
+            <section aria-labelledby="reopen-heading" class="mb-4">
+                <h2 id="reopen-heading">Reabrir caso</h2>
+                <label for="reopen-reason">Motivo da reabertura</label>
+                <textarea id="reopen-reason" class="form-control" maxlength="1000" rows="2" @bind="reopenReason"></textarea>
+                <button class="btn btn-primary mt-2" disabled="@(busy || conflictVersion is not null)" @onclick="ReopenAsync">Reabrir em análise</button>
+            </section>
+        }
+    }
+
+    <section aria-labelledby="timeline-heading">
+        <h2 id="timeline-heading">Linha do tempo</h2>
+        <ol>
+            @foreach (var entry in Timeline())
+            {
+                <li class="mb-3">
+                    <time datetime="@entry.OccurredAtUtc.ToString("O")">@FormatTime(entry.OccurredAtUtc)</time>
+                    · <strong>@entry.AuthorName</strong> · @entry.Title
+                    @if (entry.Audit is { } audit)
+                    {
+                        <div>Antes: @AuditValue(audit.Type, audit.PreviousValue) → Depois: @AuditValue(audit.Type, audit.NewValue)</div>
+                        <div>Motivo: @audit.Reason · Versão @audit.ResultingVersion</div>
+                    }
+                    else if (entry.Interaction is { } interaction)
+                    {
+                        <div>@interaction.Text</div>
+                    }
+                </li>
+            }
+        </ol>
+    </section>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationState { get; set; } = default!;
+    private RequestDetail? detail;
+    private RequestSyncState? sync;
+    private IReadOnlyList<Application.Demo.DemoUser> attendants = [];
+    private Guid actorId;
+    private Guid assigneeId;
+    private bool authenticated;
+    private bool canEdit;
+    private bool isSupervisor;
+    private bool busy;
+    private long? conflictVersion;
+    private string? message;
+    private string? error;
+    private string? assignmentReason;
+    private string? interactionText;
+    private string? nextStatus;
+    private string? statusReason;
+    private string? nextPriority;
+    private string? priorityReason;
+    private string? deadlineLocal;
+    private string? deadlineReason;
+    private string? reopenReason;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var principal = (await AuthenticationState).User;
+        authenticated = principal.Identity?.IsAuthenticated == true;
+        canEdit = principal.IsInRole("Attendant");
+        isSupervisor = principal.IsInRole("Supervisor");
+        Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out actorId);
+        if (!authenticated)
+            return;
+        using var scope = ScopeFactory.CreateScope();
+        attendants = (await scope.ServiceProvider.GetRequiredService<IDemoCatalog>().GetUsersAsync())
+            .Where(user => user.Role == "Attendant").ToList();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        using var scope = ScopeFactory.CreateScope();
+        detail = await scope.ServiceProvider.GetRequiredService<GetRequestDetailUseCase>().ExecuteAsync(Id);
+        sync = detail is null ? null : await scope.ServiceProvider.GetRequiredService<GetRequestSyncUseCase>()
+            .ExecuteAsync(Id);
+        conflictVersion = null;
+        error = null;
+        message = null;
+        if (detail is not null)
+            assigneeId = detail.AssigneeId;
+    }
+
+    private Task AssignAsync() => RunAsync((useCase, version) =>
+        useCase.AssignAsync(Id, version, actorId, assigneeId, assignmentReason), "Responsável atualizado.");
+    private Task AddInteractionAsync() => RunAsync((useCase, version) =>
+        useCase.AddInteractionAsync(Id, version, actorId, interactionText), "Interação registrada.");
+    private Task ChangeStatusAsync() => RunAsync((useCase, version) =>
+        useCase.ChangeStatusAsync(Id, version, actorId, ParseStatus(nextStatus), statusReason), "Andamento atualizado.");
+    private Task ChangePriorityAsync() => RunAsync((useCase, version) =>
+        useCase.ChangePriorityAsync(Id, version, actorId, ParsePriority(nextPriority), priorityReason), "Prioridade atualizada.");
+    private Task ChangeDeadlineAsync() => RunAsync((useCase, version) =>
+        useCase.ChangeDeadlineAsync(Id, version, actorId, ParseDeadline(deadlineLocal), deadlineReason), "Prazo atualizado.");
+    private Task ReopenAsync() => RunAsync((useCase, version) =>
+        useCase.ReopenAsync(Id, version, actorId, reopenReason), "Caso reaberto em análise.", true);
+
+    private async Task RetrySyncAsync()
+    {
+        if (busy || !isSupervisor)
+            return;
+        busy = true;
+        error = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            sync = await scope.ServiceProvider.GetRequiredService<RetryRequestSyncUseCase>().ExecuteAsync(Id);
+            detail = await scope.ServiceProvider.GetRequiredService<GetRequestDetailUseCase>().ExecuteAsync(Id);
+            message = "Envio recolocado na fila. Atualize a sincronização para ver o resultado.";
+        }
+        catch (NoFailedSyncException)
+        {
+            error = "Não há envio com falha para tentar novamente.";
+        }
+        catch (Exception)
+        {
+            error = "Não foi possível solicitar uma nova tentativa de envio.";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task RunAsync(Func<HandleRequestUseCase, long, Task<RequestDetail>> operation,
+        string success, bool supervisorAction = false)
+    {
+        if (busy || !(supervisorAction ? isSupervisor : canEdit) || detail is null || conflictVersion is not null)
+            return;
+        busy = true;
+        error = null;
+        message = null;
+        try
+        {
+            using var scope = ScopeFactory.CreateScope();
+            detail = await operation(scope.ServiceProvider.GetRequiredService<HandleRequestUseCase>(), detail.Version);
+            sync = await scope.ServiceProvider.GetRequiredService<GetRequestSyncUseCase>().ExecuteAsync(Id);
+            message = success;
+            assigneeId = detail.AssigneeId;
+            assignmentReason = interactionText = nextStatus = statusReason = nextPriority = priorityReason = deadlineLocal = deadlineReason = null;
+            reopenReason = null;
+        }
+        catch (RequestVersionConflictException exception)
+        {
+            conflictVersion = exception.CurrentVersion;
+        }
+        catch (DomainRuleException exception)
+        {
+            error = exception.Message;
+        }
+        catch (AttendantUnavailableException)
+        {
+            error = "A sessão de atendente não está mais disponível.";
+        }
+        catch (SupervisorUnavailableException)
+        {
+            error = "A sessão de supervisão não está mais disponível.";
+        }
+        catch (RequestNotFoundException)
+        {
+            error = "Solicitação não encontrada.";
+        }
+        catch (Exception)
+        {
+            error = "Não foi possível confirmar a alteração. Leia o estado atual antes de tentar novamente.";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static RequestStatus ParseStatus(string? value) =>
+        Enum.TryParse<RequestStatus>(value, out var status) && Enum.IsDefined(status)
+            ? status : throw new DomainRuleException("invalid_status", "Selecione um próximo status válido.");
+    private static RequestPriority ParsePriority(string? value) =>
+        Enum.TryParse<RequestPriority>(value, out var priority) && Enum.IsDefined(priority)
+            ? priority : throw new DomainRuleException("invalid_priority", "Selecione uma prioridade válida.");
+    private static DateTimeOffset ParseDeadline(string? value)
+    {
+        if (!DateTime.TryParseExact(value, "yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var local))
+            throw new DomainRuleException("invalid_deadline", "Informe o novo prazo.");
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
+        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(
+            DateTime.SpecifyKind(local, DateTimeKind.Unspecified), zone));
+    }
+
+    private IEnumerable<TimelineEntry> Timeline() =>
+        (detail?.AuditEvents.Select(item => new TimelineEntry(item.Id, item.OccurredAtUtc,
+            item.AuthorName, AuditLabel(item.Type), item, null)) ?? [])
+        .Concat(detail?.Interactions.Select(item => new TimelineEntry(item.Id, item.OccurredAtUtc,
+            item.AuthorName, "Interação", null, item)) ?? [])
+        .OrderBy(item => item.OccurredAtUtc).ThenBy(item => item.Id);
+
+    private sealed record TimelineEntry(Guid Id, DateTimeOffset OccurredAtUtc, string AuthorName,
+        string Title, RequestAudit? Audit, RequestInteraction? Interaction);
+
+    private static string AuditLabel(string type) => type switch
+    {
+        "Opened" => "Abertura", "StatusChanged" => "Andamento", "AssigneeChanged" => "Responsável",
+        "PriorityChanged" => "Prioridade", "DeadlineChanged" => "Prazo", "Reopened" => "Reabertura", _ => type
+    };
+    private string AuditValue(string type, string? value)
+    {
+        if (value is null) return "—";
+        if (type is "StatusChanged" or "Opened") return StatusLabel(value);
+        if (type == "PriorityChanged") return PriorityLabel(value);
+        if (type == "AssigneeChanged" && Guid.TryParse(value, out var id))
+            return attendants.FirstOrDefault(user => user.Id == id)?.DisplayName ?? value;
+        if (type == "DeadlineChanged" && DateTimeOffset.TryParse(value, out var time))
+            return FormatTime(time);
+        return value;
+    }
+    private static string StatusLabel(string status) => status switch
+    {
+        "Open" => "Aberta", "UnderReview" => "Em análise", "WaitingForCustomer" => "Aguardando cliente",
+        "Resolved" => "Resolvida", _ => status
+    };
+    private static string PriorityLabel(string priority) => priority switch
+    {
+        "Low" => "Baixa", "Medium" => "Média", "High" => "Alta", _ => priority
+    };
+    private static string SyncLabel(string? status) => status switch
+    {
+        "Pending" => "Pendente", "Processing" => "Processando", "Failed" => "Falha",
+        "Synced" => "Sincronizada", _ => "Sem evento de integração"
+    };
+    private static string SyncEventLabel(string type) => type switch
+    {
+        "RequestOpened" => "Abertura", "RequestStatusChanged" => "Mudança de status",
+        "RequestAssigneeChanged" => "Troca de responsável", _ => type
+    };
+    private static string FormatTime(DateTimeOffset instant) =>
+        TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo"))
+            .ToString("dd/MM/yyyy HH:mm", CultureInfo.GetCultureInfo("pt-BR"));
+}

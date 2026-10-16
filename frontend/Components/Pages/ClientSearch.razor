@@ -1,0 +1,78 @@
+@page "/clients"
+@using Application.Clients
+@using Domain
+@using Microsoft.AspNetCore.Components.Authorization
+@inject SearchClientsUseCase SearchClients
+
+<PageTitle>Buscar clientes</PageTitle>
+
+<h1>Buscar clientes</h1>
+
+@if (!authenticated)
+{
+    <p>Selecione um usuário fictício na <a href="/">página inicial</a> para consultar clientes.</p>
+}
+else
+{
+    <p>Pesquise pelo nome fictício ou identificador do cliente.</p>
+    <form method="get" action="/clients" class="mb-4">
+        <label for="client-query" class="form-label">Nome ou identificador</label>
+        <div class="d-flex gap-2">
+            <input id="client-query" name="query" value="@Query" maxlength="100" required
+                   class="form-control" autocomplete="off" />
+            <button type="submit" class="btn btn-primary">Buscar</button>
+        </div>
+    </form>
+
+    @if (error is not null)
+    {
+        <p role="alert" class="text-danger">@error</p>
+    }
+    else if (searched)
+    {
+        <h2>Resultados</h2>
+        @if (results.Count == 0)
+        {
+            <p>Nenhum cliente encontrado.</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var client in results)
+                {
+                    <li><a href="@($"/clients/{client.Id}")">@client.DisplayName</a> <small>@client.Id</small></li>
+                }
+            </ul>
+        }
+    }
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationState { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "query")] public string? Query { get; set; }
+
+    private bool authenticated;
+    private bool searched;
+    private string? error;
+    private IReadOnlyList<ClientSearchItem> results = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        authenticated = (await AuthenticationState).User.Identity?.IsAuthenticated == true;
+        searched = false;
+        error = null;
+        results = [];
+        if (!authenticated || Query is null)
+            return;
+
+        searched = true;
+        try
+        {
+            results = await SearchClients.ExecuteAsync(Query);
+        }
+        catch (DomainRuleException exception)
+        {
+            error = exception.Message;
+        }
+    }
+}

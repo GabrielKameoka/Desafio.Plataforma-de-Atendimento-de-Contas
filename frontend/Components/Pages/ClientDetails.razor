@@ -1,0 +1,117 @@
+@page "/clients/{Id:guid}"
+@using Application.Clients
+@using Microsoft.AspNetCore.Components.Authorization
+@inject GetClientContextUseCase GetClientContext
+
+<PageTitle>Contexto do cliente</PageTitle>
+
+<p><a href="/clients">← Voltar à busca</a></p>
+
+@if (!authenticated)
+{
+    <h1>Contexto do cliente</h1>
+    <p>Selecione um usuário fictício na <a href="/">página inicial</a> para consultar clientes.</p>
+}
+else if (client is null)
+{
+    <h1>Cliente não encontrado</h1>
+    <p>Confira o identificador e tente outra busca.</p>
+}
+else
+{
+    <h1>@client.DisplayName</h1>
+    <p>Identificador: <code>@client.Id</code></p>
+    @if (canOpen)
+    {
+        <p><a class="btn btn-primary" href="@($"/clients/{Id}/requests/new")">Abrir contestação de tarifa</a></p>
+    }
+
+    <section class="mt-4" aria-labelledby="requests-heading">
+        <h2 id="requests-heading">Solicitações</h2>
+        @if (client.Requests.Count == 0)
+        {
+            <p>Este cliente ainda não tem solicitações.</p>
+        }
+        else
+        {
+            <ol>
+                @foreach (var request in client.Requests)
+                {
+                    <li class="mb-3">
+                        <strong><a href="@($"/requests/{request.Id}")">@request.Protocol</a></strong> — @RequestTypeLabel(request.Type)<br />
+                        <span>@request.Description</span><br />
+                        <small>Status: @StatusLabel(request.Status) · Prioridade: @PriorityLabel(request.Priority) ·
+                            Responsável: @request.AssigneeName · Abertura: @FormatTime(request.OpenedAtUtc) ·
+                            Prazo: @FormatTime(request.DeadlineAtUtc)</small>
+                    </li>
+                }
+            </ol>
+        }
+    </section>
+
+    <section class="mt-4" aria-labelledby="history-heading">
+        <h2 id="history-heading">Histórico de contatos</h2>
+        @if (client.Interactions.Count == 0)
+        {
+            <p>Nenhum contato registrado nas solicitações deste cliente.</p>
+        }
+        else
+        {
+            <ol>
+                @foreach (var interaction in client.Interactions)
+                {
+                    <li class="mb-3">
+                        @interaction.AuthorName · 
+                        <time datetime="@interaction.CreatedAtUtc.ToString("O")">@FormatTime(interaction.CreatedAtUtc)</time>
+                        · @interaction.Protocol<br/>
+                        @interaction.Text
+                    </li>
+                }
+            </ol>
+        }
+    </section>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationState { get; set; } = default!;
+
+    private bool authenticated;
+    private bool canOpen;
+    private ClientContext? client;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var principal = (await AuthenticationState).User;
+        authenticated = principal.Identity?.IsAuthenticated == true;
+        canOpen = principal.IsInRole("Attendant");
+        client = authenticated ? await GetClientContext.ExecuteAsync(Id) : null;
+    }
+
+    private static string RequestTypeLabel(string type) => type switch
+    {
+        "FeeDispute" => "Contestação de tarifa",
+        _ => type
+    };
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "Open" => "Aberta",
+        "UnderReview" => "Em análise",
+        "WaitingForCustomer" => "Aguardando cliente",
+        "Resolved" => "Resolvida",
+        _ => status
+    };
+
+    private static string PriorityLabel(string priority) => priority switch
+    {
+        "Low" => "Baixa",
+        "Medium" => "Média",
+        "High" => "Alta",
+        _ => priority
+    };
+
+    private static string FormatTime(DateTimeOffset instant) =>
+        TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo"))
+            .ToString("dd/MM/yyyy HH:mm");
+}

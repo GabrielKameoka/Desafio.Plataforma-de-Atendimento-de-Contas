@@ -20,16 +20,17 @@
     {
         <section class="mt-4">
             <h2>Clientes fictícios</h2>
+            <p><a href="/clients">Buscar cliente e consultar histórico de contatos</a></p>
             <ul>
                 @foreach (var client in data.Clients)
                 {
-                    <li>@client.DisplayName</li>
+                    <li><a href="@($"/clients/{client.Id}")">@client.DisplayName</a></li>
                 }
             </ul>
         </section>
         @if (isSupervisor)
         {
-            <p>O perfil de supervisor pode consultar a visão resumida em <code>/api/demo/supervisor/overview</code>.</p>
+            <p><a href="/supervision">Abrir fila de supervisão e acompanhar prazos</a></p>
         }
     }
 }

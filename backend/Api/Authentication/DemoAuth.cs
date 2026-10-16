@@ -9,6 +9,7 @@ public static class DemoAuth
 {
     public const string CookieScheme = "DemoCookie";
     public const string StaffPolicy = "DemoStaff";
+    public const string AttendantPolicy = "DemoAttendant";
     public const string SupervisorPolicy = "DemoSupervisor";
 
     public static async Task SignInAsync(HttpContext context, SelectedDemoUser user)

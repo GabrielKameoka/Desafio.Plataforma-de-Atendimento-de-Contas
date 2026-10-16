@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\backend\Api\Api.csproj" />
+    <ProjectReference Include="..\..\crm-simulator\CrmSimulator.csproj" Aliases="crm" />
   </ItemGroup>
 
 </Project>

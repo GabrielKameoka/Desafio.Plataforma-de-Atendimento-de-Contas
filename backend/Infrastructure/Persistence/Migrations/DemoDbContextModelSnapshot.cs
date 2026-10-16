@@ -220,6 +220,10 @@ namespace Infrastructure.Persistence.Migrations
                     b.Property<Guid>("RequestId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ResponseJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
                     b.HasKey("Key");
 
                     b.HasIndex("RequestId")

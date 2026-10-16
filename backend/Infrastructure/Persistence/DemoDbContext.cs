@@ -96,6 +96,7 @@ public sealed class DemoDbContext(DbContextOptions<DemoDbContext> options) : DbC
             entity.Property(record => record.Key).HasMaxLength(120);
             entity.Property(record => record.RequestHash).HasMaxLength(64).IsFixedLength().IsRequired();
             entity.Property(record => record.Protocol).HasMaxLength(40).IsRequired();
+            entity.Property(record => record.ResponseJson).HasColumnType("jsonb").IsRequired();
             entity.Property(record => record.CreatedAtUtc).HasColumnType("timestamp with time zone");
             entity.HasOne<ServiceRequest>().WithOne()
                 .HasForeignKey<IdempotencyRecord>(record => record.RequestId).OnDelete(DeleteBehavior.Restrict);

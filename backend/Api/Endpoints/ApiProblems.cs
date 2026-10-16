@@ -10,6 +10,10 @@ public static class ApiProblems
         Results.Problem(title: title, statusCode: StatusCodes.Status404NotFound,
             extensions: new Dictionary<string, object?> { ["code"] = code });
 
+    public static IResult Conflict(string code, string title) =>
+        Results.Problem(title: title, statusCode: StatusCodes.Status409Conflict,
+            extensions: new Dictionary<string, object?> { ["code"] = code });
+
     public static IResult Unauthorized() =>
         Results.Problem(title: "Sessão necessária.", statusCode: StatusCodes.Status401Unauthorized,
             extensions: new Dictionary<string, object?> { ["code"] = "session_required" });

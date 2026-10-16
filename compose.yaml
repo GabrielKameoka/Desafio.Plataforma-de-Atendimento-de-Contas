@@ -19,6 +19,13 @@ services:
     build:
       context: .
       dockerfile: crm-simulator/Dockerfile
+    environment:
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=atendimento;Username=atendimento;Password=local_demo_only
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8080"]
       interval: 3s
